@@ -1,0 +1,208 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Parameters:
+  CidrApiEndpoint:
+    Type: String
+    Default: https://9ux823go17.execute-api.eu-west-1.amazonaws.com/v0
+  PublicCidrSize:
+    Type: String
+    AllowedValues: [ "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28" ]
+  PrivateCidrSize:
+    Type: String
+    AllowedValues: [ "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28" ]
+  VpcId:
+    Type: String
+
+Resources:
+  Subnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VpcId
+      AvailabilityZone: !Select [ 0, !GetAZs '' ]
+      CidrBlock: !GetAtt SubnetAllocate.cidr
+
+  # First pass to API, allocate with POST and DELETE NOOP.
+  SubnetAllocate:
+    Type: Custom::SubnetAllocate
+    Properties:
+      ServiceToken: !GetAtt IpamApiFunction.Arn
+      CidrApiEndpoint: !Ref CidrApiEndpoint
+      Prefix: !Ref PublicCidrSize
+      VpcId: !Ref VpcId
+
+
+  SubnetUpdateMetadata:
+    Type: Custom::SubnetUpdateMetadata
+    Properties:
+      ServiceToken: !GetAtt IpamApiFunction.Arn
+      CidrApiEndpoint: !Ref CidrApiEndpoint
+      Cidr: !GetAtt SubnetAllocate.cidr
+      VpcId: !Ref VpcId
+      SubnetId: !Ref Subnet
+      AvailabilityZone: !GetAtt Subnet.AvailabilityZone
+      ApiRegion: !Select [2, !Split [".", !Ref CidrApiEndpoint]]
+
+
+
+  IpamApiFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Code:
+        ZipFile: |
+          const AWS = require('aws-sdk');
+          const https = require('https');
+          var cfn;
+          try {
+              cfn = require('cfn-response');
+          } catch (e){
+              // SAM doesnt have cfn-response, mock by logging to console.log.
+              cfn = {};
+              cfn.send = function(){
+                  console.log(JSON.stringify(arguments));
+              }
+          }
+
+          exports.handler = async function (event, context) {
+              console.log(event);
+              try {
+                  var status = cfn.FAILED;
+                  var response;
+                  switch (event['RequestType']) {
+                      case "Create":
+                          if ( event['ResourceProperties']['Cidr'] ) {
+                              response = await putHandler(event);
+                          }else{
+                              response = await postHandler(event);
+                          }
+                          break;
+                      case "Delete":
+                          if ( event['ResourceProperties']['Cidr'] ) {
+                              response = await deleteHandler(event);
+                          }else{
+                              response = {message:'noop'};
+                          }
+                          break;
+                      case "Update":
+                          // Update is a NOOP.
+                          response = {message:'noop'};
+                          break;
+                  }
+                  status = cfn.SUCCESS;
+              } catch (error) {
+                  response = {error: error};
+              }
+              await cfn.send(event, context, status, response);
+          }
+
+          async function deleteHandler(event) {
+              var url = event['ResourceProperties']['CidrApiEndpoint'].replace(/\/$/, "") + "/subnet";
+              url += '?cidr=' + event['ResourceProperties']['Cidr'];
+              return makeApiQuest('DELETE', url);
+          }
+
+          async function postHandler(event) {
+              var url = event['ResourceProperties']['CidrApiEndpoint'].replace(/\/$/, "") + "/subnet";
+              url += '?prefix=' + event['ResourceProperties']['Prefix'];
+              url += '&vpcid=' + event['ResourceProperties']['VpcId'];
+
+              return makeApiQuest('POST', url);
+          }
+
+          async function putHandler(event) {
+              var url = event['ResourceProperties']['CidrApiEndpoint'].replace(/\/$/, "") + "/subnet";
+              url += '?cidr=' + event['ResourceProperties']['Cidr'];
+              url += '&subnetid=' + event['ResourceProperties']['SubnetId'];
+              url += '&availabilityzone=' + event['ResourceProperties']['AvailabilityZone'];
+
+              return makeApiQuest('PUT', url);
+          }
+
+          function makeApiQuest(method, uri) {
+              const uriParts = new URL(uri);
+
+              const httpRequest = new AWS.HttpRequest(uri, process.env['AWS_REGION']);
+              httpRequest.headers.host = uriParts.host;
+              httpRequest.headers['Content-Type'] = 'application/json';
+              httpRequest.method = method;
+
+              const signer = new AWS.Signers.V4(httpRequest, "execute-api", true);
+              signer.addAuthorization(AWS.config.credentials, AWS.util.date.getDate());
+
+              const options = {
+                  host: uriParts.host,
+                  protocol: uriParts.protocol,
+                  path: uriParts.pathname + uriParts.search,
+                  headers: httpRequest.headers,
+                  method: method
+              }
+
+              return new Promise((resolve, reject) => {
+                  const req = https.request(options, (res) => {
+                      var response = "";
+
+                      res.on('data', (d) => {
+                          response += d;
+                      });
+                      res.on('end', (data) => {
+                          response = JSON.parse(response);
+
+                          if (res.statusCode === 200) {
+                              resolve(response);
+                          } else {
+                              reject(response.message);
+                          }
+                      });
+                  });
+
+                  req.on('error', (e) => {
+                      reject(e);
+                  });
+
+                  req.end();
+              });
+          }
+      Handler: index.handler
+      Description: A simple example includes a HTTP get method to get all items from a DynamoDB table.
+      Runtime: nodejs12.x
+      MemorySize: 128
+      Timeout: 100
+      Role: !GetAtt LambdaExecutionRole.Arn
+
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonAPIGatewayInvokeFullAccess
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:*
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:DescribeLogGroups
+                Resource: !Sub arn:${AWS::Partition}:logs:*:*:*
+
+
+#Outputs:
+#  VpcId:
+#    Value: !Ref VPC
+#  VpcCidr:
+#    Value: !GetAtt AllocateCidr.cidr

@@ -1,0 +1,7 @@
+{
+  "Parameters": {
+    "DYNAMODB_VPC_TABLE": "ip-mgmt-subnets",
+    "DYNAMODB_SUPERNETS_TABLE": "ip-mgmt-supernets",
+    "SNS_TOPIC": "arn:aws:sns:eu-west-1:352871654644:ip-management-SnsAlerts-76K7HXGN3698"
+  }
+}

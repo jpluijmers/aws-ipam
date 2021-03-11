@@ -1,0 +1,8 @@
+{
+  "Parameters": {
+    "DYNAMODB_SUBNETS_TABLE": "vixy-ipam-test-ipam-DDBSubnetsTable",
+    "DYNAMODB_VPC_TABLE": "vixy-ipam-test-ipam-DDBVpcTable",
+    "DYNAMODB_SUPERNETS_TABLE": "vixy-ipam-test-ipam-DDBSupernetsTableName",
+    "SNS_TOPIC": "arn:aws:sns:eu-west-1:352871654644:vixy-ipam-test-SnsAlerts-1O0YB1JM5S72E"
+  }
+}

@@ -1,0 +1,34 @@
+# This is the SAM template that represents the architecture of your serverless application
+# https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/serverless-sam-template-basics.html
+
+# The AWSTemplateFormatVersion identifies the capabilities of the template
+# https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/format-version-structure.html
+AWSTemplateFormatVersion: 2010-09-09
+Description: >-
+  aws-subnet-allocate
+
+# Transform section specifies one or more macros that AWS CloudFormation uses to process your template
+# https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/transform-section-structure.html
+Transform:
+  - AWS::Serverless-2016-10-31
+
+Globals:
+  Function:
+#    Environment:
+#      # # Environment variables used by every function
+#      Variables:
+#        DYNAMODB_SUBNETS_TABLE: !Sub '${AWS::StackName}-ipam-DDBSubnetsTable'
+#        DYNAMODB_VPC_TABLE: !Sub '${AWS::StackName}-ipam-DDBVpcTable'
+#        DYNAMODB_SUPERNETS_TABLE: !Sub '${AWS::StackName}-ipam-DDBSupernetsTableName'
+#        SNS_TOPIC: !Ref SnsAlerts
+    Runtime: nodejs12.x
+    MemorySize: 128
+    Timeout: 100
+
+Resources:
+  AllocateVpcFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: .
+      Handler: index.handler
+      Description: A simple example includes a HTTP get method to get all items from a DynamoDB table.

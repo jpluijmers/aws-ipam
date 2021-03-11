@@ -1,0 +1,1 @@
+export type DDBDto = { [key: string]: any };

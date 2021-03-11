@@ -1,0 +1,6 @@
+{
+  "ResourceProperties": {
+    "CidrApiEndpoint": "https://ecjpncaf72.execute-api.eu-west-1.amazonaws.com/v0"
+  },
+  "RequestType": "Delete"
+}

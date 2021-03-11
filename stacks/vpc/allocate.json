@@ -1,0 +1,14 @@
+{
+  "ResourceProperties": {
+    "CidrApiEndpoint": "https://ecjpncaf72.execute-api.eu-west-1.amazonaws.com/v0",
+    "Prefix": "19",
+    "AccountId": "TEST_ACCOUNT_ID",
+    "ProjectCode": "TEST_PROJECT",
+    "Requestor": "TEST_REQUESTOR",
+    "Reason": "TEST_REASON",
+    "Region": "eu-west-1",
+    "Env": "TEST",
+    "StackId": "TEST_STACK"
+  },
+  "RequestType": "Create"
+}

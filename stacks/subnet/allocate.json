@@ -1,0 +1,8 @@
+{
+  "ResourceProperties": {
+    "CidrApiEndpoint": "https://jvhop5b440.execute-api.eu-west-1.amazonaws.com/v0/",
+    "Prefix": "24",
+    "VpcId": "vpc-0bda2352e4712ca7b"
+  },
+  "RequestType": "Create"
+}

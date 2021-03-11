@@ -1,0 +1,222 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Parameters:
+  CidrApiEndpoint:
+    Type: String
+    Default: https://9ux823go17.execute-api.eu-west-1.amazonaws.com/v0
+  VpcCidrSize:
+    Type: String
+    AllowedValues: [ "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28" ]
+  ProjectCode:
+    Type: String
+  Requestor:
+    Type: String
+  Reason:
+    Type: String
+  Environment:
+    Type: String
+    Description: Dev|Stg|Prod
+
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !GetAtt VpcAllocate.cidr
+
+  # First pass to API, allocate with POST and DELETE NOOP.
+  VpcAllocate:
+    Type: Custom::VpcAllocate
+    Properties:
+      ServiceToken: !GetAtt IpamApiFunction.Arn
+      Prefix: !Ref VpcCidrSize
+      CidrApiEndpoint: !Ref CidrApiEndpoint
+      AccountId: !Ref AWS::AccountId
+      ProjectCode: !Ref ProjectCode
+      Requestor: !Ref Requestor
+      Reason: !Ref Reason
+      Region: !Ref AWS::Region
+      Env: !Ref Environment
+      ApiRegion: !Select [2, !Split [".", !Ref CidrApiEndpoint]]
+      StackId: !Ref AWS::StackId
+
+  # Second pass to API, register VpcId and other metadata and do actual DELETE.
+  VpcUpdateMetadata:
+    Type: Custom::updateCidr
+    Properties:
+      ServiceToken: !GetAtt IpamApiFunction.Arn
+      CidrApiEndpoint: !Ref CidrApiEndpoint
+      Cidr: !GetAtt VpcAllocate.cidr
+      VpcId: !Ref VPC
+      ApiRegion: !Select [2, !Split [".", !Ref CidrApiEndpoint]]
+
+
+  IpamApiFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Code:
+        ZipFile: |
+          const vm = require('vm');
+          const AWS = require('aws-sdk');
+          const https = require('https');
+          const url = require('url');
+          var cfn;
+          try {
+              cfn = require('cfn-response');
+          } catch (e){
+              // SAM doesnt have cfn-response, mock.
+              cfn = {};
+              cfn.send = function(){
+                  console.log(JSON.stringify(arguments));
+              }
+          }
+
+          exports.handler = async function (event, context) {
+              console.log(event);
+              try {
+                  var status = cfn.FAILED;
+                  var response;
+                  switch (event['RequestType']) {
+                      case "Create":
+                          if ( event['ResourceProperties']['Cidr'] ) {
+                              response = await putHandler(event);
+                          }else{
+                              response = await postHandler(event);
+                          }
+                          break;
+                      case "Delete":
+                          if ( event['ResourceProperties']['Cidr'] ) {
+                              response = await deleteHandler(event);
+                          }else{
+                              response = {message:'noop'};
+                          }
+                          break;
+                      case "Update":
+                          // Update is a NOOP.
+                          response = {message:'noop'};
+                          break;
+                  }
+                  status = cfn.SUCCESS;
+              } catch (error) {
+                  response = {error: error};
+              }
+              await cfn.send(event, context, status, response);
+          }
+
+          async function deleteHandler(event) {
+              var url = event['ResourceProperties']['CidrApiEndpoint'].replace(/\/$/, "") + "/vpc";
+              url += '?cidr=' + event['ResourceProperties']['Cidr'];
+              return apiRequest('DELETE', url);
+          }
+
+          async function putHandler(event) {
+              var url = event['ResourceProperties']['CidrApiEndpoint'].replace(/\/$/, "") + "/vpc";
+              url += '?cidr=' + event['ResourceProperties']['Cidr'];
+              url += '&vpcid=' + event['ResourceProperties']['VpcId'];
+              return apiRequest('PUT', url);
+          }
+
+          async function postHandler(event) {
+              var url = event['ResourceProperties']['CidrApiEndpoint'].replace(/\/$/, "") + "/vpc";
+              url += '?prefix=' + event['ResourceProperties']['Prefix'];
+              url += '&accountid=' + event['ResourceProperties']['AccountId'];
+              url += '&projectcode=' + event['ResourceProperties']['ProjectCode'];
+              url += '&requestor=' + event['ResourceProperties']['Requestor'];
+              url += '&reason=' + event['ResourceProperties']['Reason'];
+              url += '&region=' + event['ResourceProperties']['Region'];
+              url += '&env=' + event['ResourceProperties']['Env'];
+              url += '&stackid=' + event['ResourceProperties']['StackId'];
+
+              return apiRequest('POST', url);
+          }
+
+          function apiRequest(method, uri) {
+              const uriParts = new URL(uri);
+
+              console.log("Making request: " + method + " " + uri);
+
+              const httpRequest = new AWS.HttpRequest(uri, process.env['AWS_REGION']);
+              httpRequest.headers.host = uriParts.host;
+              httpRequest.headers['Content-Type'] = 'application/json';
+              httpRequest.method = method;
+
+              const signer = new AWS.Signers.V4(httpRequest, "execute-api", true);
+              signer.addAuthorization(AWS.config.credentials, AWS.util.date.getDate());
+
+              const options = {
+                  host: uriParts.host,
+                  protocol: uriParts.protocol,
+                  path: uriParts.pathname + uriParts.search,
+                  headers: httpRequest.headers,
+                  method: method
+              }
+
+              return new Promise((resolve, reject) => {
+                  const req = https.request(options, (res) => {
+                      var response = "";
+
+                      res.on('data', (d) => {
+                          response += d;
+                      });
+                      res.on('end', (data) => {
+                          response = JSON.parse(response);
+
+                          if (res.statusCode === 200) {
+                              resolve(response);
+                          } else {
+                              reject(response.message);
+                          }
+                      });
+                  });
+
+                  req.on('error', (e) => {
+                      reject(e);
+                  });
+
+                  req.end();
+              });
+          }
+      Handler: index.handler
+      Description: Connect to VIXY IPAM
+      Runtime: nodejs12.x
+      MemorySize: 128
+      Timeout: 100
+      Role: !GetAtt LambdaExecutionRole.Arn
+
+
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonAPIGatewayInvokeFullAccess
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:*
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:DescribeLogGroups
+                Resource: !Sub arn:${AWS::Partition}:logs:*:*:*
+
+Outputs:
+  VpcId:
+    Value: !Ref VPC
+  VpcCidr:
+    Value: !GetAtt VpcAllocate.cidr

@@ -1,0 +1,617 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Parameters:
+  VpcId:
+    Type: String
+  CidrApiEndpoint:
+    Type: String
+    Default: https://9ux823go17.execute-api.eu-west-1.amazonaws.com/v0
+  PublicCidrSize:
+    Type: String
+    AllowedValues: [ "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28" ]
+  PrivateCidrSize:
+    Type: String
+    AllowedValues: [ "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28" ]
+  AvailabilityZones:
+    Type: Number
+    Description: Amount of AZs and Subnets to build from left to right
+    Default: 2
+    AllowedValues:
+      - 1
+      - 2
+      - 3
+
+Conditions:
+  ShouldConfigureZoneA: !Or
+    - !Equals [1, !Ref AvailabilityZones]
+    - !Equals [2, !Ref AvailabilityZones]
+    - !Equals [3, !Ref AvailabilityZones]
+  ShouldConfigureZoneB: !Or
+    - !Equals [2, !Ref AvailabilityZones]
+    - !Equals [3, !Ref AvailabilityZones]
+  ShouldConfigureZoneC: !Equals [3, !Ref AvailabilityZones]
+
+Resources:
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-IGW
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref VpcId
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-Routetable
+  EgresRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  ########### Zone A
+  ZoneAPublicSubnetAllocate:
+    Type: Custom::ZoneAPublicSubnetAllocate
+    Condition: ShouldConfigureZoneA
+    Properties:
+      ServiceToken: !GetAtt IpamApiFunction.Arn
+      CidrApiEndpoint: !Ref CidrApiEndpoint
+      Prefix: !Ref PublicCidrSize
+      VpcId: !Ref VpcId
+
+  ZoneAPublicSubnet:
+    Type: AWS::EC2::Subnet
+    Condition: ShouldConfigureZoneA
+    Properties:
+      AvailabilityZone: !Select
+        - 0
+        - Fn::GetAZs: !Ref 'AWS::Region'
+      CidrBlock:  !GetAtt ZoneAPublicSubnetAllocate.cidr
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-ZoneAPublicSubnet
+
+  ZoneAPublicRouteTableAttachment:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: ShouldConfigureZoneA
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref ZoneAPublicSubnet
+
+  ZoneAPublicSubnetUpdateMetadata:
+    Type: Custom::SubnetUpdateMetadata
+    Condition: ShouldConfigureZoneA
+    Properties:
+      ServiceToken: !GetAtt IpamApiFunction.Arn
+      CidrApiEndpoint: !Ref CidrApiEndpoint
+      Cidr: !GetAtt ZoneAPublicSubnetAllocate.cidr
+      VpcId: !Ref VpcId
+      SubnetId: !Ref ZoneAPublicSubnet
+      AvailabilityZone: !GetAtt ZoneAPublicSubnet.AvailabilityZone
+      ApiRegion: !Select [2, !Split [".", !Ref CidrApiEndpoint]]
+
+  ZoneANatEIP:
+    Type: AWS::EC2::EIP
+    DependsOn: InternetGatewayAttachment
+    Condition: ShouldConfigureZoneA
+    Properties:
+      Domain: vpc
+
+  ZoneANat:
+    Type: AWS::EC2::NatGateway
+    Condition: ShouldConfigureZoneA
+    Properties:
+      AllocationId: !GetAtt ZoneANatEIP.AllocationId
+      SubnetId: !Ref ZoneAPublicSubnet
+
+  ZoneAPrivateSubnetAllocate:
+    Type: Custom::ZoneAPrivateSubnetAllocate
+    Condition: ShouldConfigureZoneA
+    DependsOn: ZoneAPublicSubnetUpdateMetadata
+    Properties:
+      ServiceToken: !GetAtt IpamApiFunction.Arn
+      CidrApiEndpoint: !Ref CidrApiEndpoint
+      Prefix: !Ref PrivateCidrSize
+      VpcId: !Ref VpcId
+
+  ZoneAPrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Condition: ShouldConfigureZoneA
+    Properties:
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName} Private Routes (AZ1)
+
+  ZoneAPrivateEgressRoute:
+    Type: AWS::EC2::Route
+    Condition: ShouldConfigureZoneA
+    Properties:
+      RouteTableId: !Ref ZoneAPrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref ZoneANat
+
+  ZoneAPrivateSubnet:
+    Type: AWS::EC2::Subnet
+    Condition: ShouldConfigureZoneA
+    Properties:
+      AvailabilityZone: !Select
+        - 0
+        - Fn::GetAZs: !Ref 'AWS::Region'
+      CidrBlock:  !GetAtt ZoneAPrivateSubnetAllocate.cidr
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-ZoneAPrivateSubnet
+
+  ZoneAPrivateRouteTableAttachment:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: ShouldConfigureZoneA
+    Properties:
+      RouteTableId: !Ref ZoneAPrivateRouteTable
+      SubnetId: !Ref ZoneAPrivateSubnet
+
+  ZoneAPrivateSubnetUpdateMetadata:
+    Type: Custom::SubnetUpdateMetadata
+    Condition: ShouldConfigureZoneA
+    Properties:
+      ServiceToken: !GetAtt IpamApiFunction.Arn
+      CidrApiEndpoint: !Ref CidrApiEndpoint
+      Cidr: !GetAtt ZoneAPrivateSubnetAllocate.cidr
+      VpcId: !Ref VpcId
+      SubnetId: !Ref ZoneAPrivateSubnet
+      AvailabilityZone: !GetAtt ZoneAPrivateSubnet.AvailabilityZone
+      ApiRegion: !Select [2, !Split [".", !Ref CidrApiEndpoint]]
+
+  ########### Zone B
+  ZoneBPublicSubnetAllocate:
+    Type: Custom::ZoneBPublicSubnetAllocate
+    Condition: ShouldConfigureZoneB
+    DependsOn: ZoneAPrivateSubnetUpdateMetadata
+    Properties:
+      ServiceToken: !GetAtt IpamApiFunction.Arn
+      CidrApiEndpoint: !Ref CidrApiEndpoint
+      Prefix: !Ref PublicCidrSize
+      VpcId: !Ref VpcId
+
+  ZoneBPublicSubnet:
+    Type: AWS::EC2::Subnet
+    Condition: ShouldConfigureZoneB
+    Properties:
+      AvailabilityZone: !Select
+        - 1
+        - Fn::GetAZs: !Ref 'AWS::Region'
+      CidrBlock: !GetAtt ZoneBPublicSubnetAllocate.cidr
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-ZoneBPublicSubnet
+
+  ZoneBPublicRouteTableAttachment:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: ShouldConfigureZoneB
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref ZoneBPublicSubnet
+
+
+  ZoneBPublicSubnetUpdateMetadata:
+    Type: Custom::SubnetUpdateMetadata
+    Condition: ShouldConfigureZoneB
+    Properties:
+      ServiceToken: !GetAtt IpamApiFunction.Arn
+      CidrApiEndpoint: !Ref CidrApiEndpoint
+      Cidr: !GetAtt ZoneBPublicSubnetAllocate.cidr
+      VpcId: !Ref VpcId
+      SubnetId: !Ref ZoneBPublicSubnet
+      AvailabilityZone: !GetAtt ZoneBPublicSubnet.AvailabilityZone
+      ApiRegion: !Select [2, !Split [".", !Ref CidrApiEndpoint]]
+
+  ZoneBNatEIP:
+    Type: AWS::EC2::EIP
+    DependsOn: InternetGatewayAttachment
+    Condition: ShouldConfigureZoneB
+    Properties:
+      Domain: vpc
+
+  ZoneBNat:
+    Type: AWS::EC2::NatGateway
+    Condition: ShouldConfigureZoneB
+    Properties:
+      AllocationId: !GetAtt ZoneBNatEIP.AllocationId
+      SubnetId: !Ref ZoneBPublicSubnet
+      
+      
+  ZoneBPrivateSubnetAllocate:
+    Type: Custom::ZoneBPrivateSubnetAllocate
+    Condition: ShouldConfigureZoneB
+    DependsOn: ZoneBPublicSubnetUpdateMetadata
+    Properties:
+      ServiceToken: !GetAtt IpamApiFunction.Arn
+      CidrApiEndpoint: !Ref CidrApiEndpoint
+      Prefix: !Ref PrivateCidrSize
+      VpcId: !Ref VpcId
+
+  ZoneBPrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Condition: ShouldConfigureZoneB
+    Properties:
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName} Private Routes (AZ1)
+
+  ZoneBPrivateEgressRoute:
+    Type: AWS::EC2::Route
+    Condition: ShouldConfigureZoneB
+    Properties:
+      RouteTableId: !Ref ZoneBPrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref ZoneBNat
+
+  ZoneBPrivateSubnet:
+    Type: AWS::EC2::Subnet
+    Condition: ShouldConfigureZoneB
+    Properties:
+      AvailabilityZone: !Select
+        - 1
+        - Fn::GetAZs: !Ref 'AWS::Region'
+      CidrBlock:  !GetAtt ZoneBPrivateSubnetAllocate.cidr
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-ZoneBPrivateSubnet
+
+  ZoneBPrivateRouteTableAttachment:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: ShouldConfigureZoneB
+    Properties:
+      RouteTableId: !Ref ZoneBPrivateRouteTable
+      SubnetId: !Ref ZoneBPrivateSubnet
+
+  ZoneBPrivateSubnetUpdateMetadata:
+    Type: Custom::SubnetUpdateMetadata
+    Condition: ShouldConfigureZoneB
+    Properties:
+      ServiceToken: !GetAtt IpamApiFunction.Arn
+      CidrApiEndpoint: !Ref CidrApiEndpoint
+      Cidr: !GetAtt ZoneBPrivateSubnetAllocate.cidr
+      VpcId: !Ref VpcId
+      SubnetId: !Ref ZoneBPrivateSubnet
+      AvailabilityZone: !GetAtt ZoneBPrivateSubnet.AvailabilityZone
+      ApiRegion: !Select [2, !Split [".", !Ref CidrApiEndpoint]]
+
+
+  ########### Zone C
+  ZoneCPublicSubnetAllocate:
+    Type: Custom::ZoneCPublicSubnetAllocate
+    DependsOn: ZoneBPrivateSubnetUpdateMetadata
+    Condition: ShouldConfigureZoneC
+    Properties:
+      ServiceToken: !GetAtt IpamApiFunction.Arn
+      CidrApiEndpoint: !Ref CidrApiEndpoint
+      Prefix: !Ref PublicCidrSize
+      VpcId: !Ref VpcId
+
+  ZoneCPublicSubnet:
+    Type: AWS::EC2::Subnet
+    Condition: ShouldConfigureZoneC
+    Properties:
+      AvailabilityZone: !Select
+        - 2
+        - Fn::GetAZs: !Ref 'AWS::Region'
+      CidrBlock: !GetAtt ZoneCPublicSubnetAllocate.cidr
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-ZoneCPublicSubnet
+
+  ZoneCPublicRouteTableAttachment:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: ShouldConfigureZoneC
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref ZoneCPublicSubnet
+
+  ZoneCPublicSubnetUpdateMetadata:
+    Type: Custom::SubnetUpdateMetadata
+    Condition: ShouldConfigureZoneC
+    Properties:
+      ServiceToken: !GetAtt IpamApiFunction.Arn
+      CidrApiEndpoint: !Ref CidrApiEndpoint
+      Cidr: !GetAtt ZoneCPublicSubnetAllocate.cidr
+      VpcId: !Ref VpcId
+      SubnetId: !Ref ZoneCPublicSubnet
+      AvailabilityZone: !GetAtt ZoneCPublicSubnet.AvailabilityZone
+      ApiRegion: !Select [2, !Split [".", !Ref CidrApiEndpoint]]
+
+  ZoneCNatEIP:
+    Type: AWS::EC2::EIP
+    DependsOn: InternetGatewayAttachment
+    Condition: ShouldConfigureZoneC
+    Properties:
+      Domain: vpc
+
+  ZoneCNat:
+    Type: AWS::EC2::NatGateway
+    Condition: ShouldConfigureZoneC
+    Properties:
+      AllocationId: !GetAtt ZoneCNatEIP.AllocationId
+      SubnetId: !Ref ZoneCPublicSubnet
+
+  ZoneCPrivateSubnetAllocate:
+    Type: Custom::ZoneCPrivateSubnetAllocate
+    Condition: ShouldConfigureZoneC
+    DependsOn: ZoneCPublicSubnetAllocate
+    Properties:
+      ServiceToken: !GetAtt IpamApiFunction.Arn
+      CidrApiEndpoint: !Ref CidrApiEndpoint
+      Prefix: !Ref PrivateCidrSize
+      VpcId: !Ref VpcId
+
+  ZoneCPrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Condition: ShouldConfigureZoneC
+    Properties:
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName} Private Routes (AZ1)
+
+  ZoneCPrivateEgressRoute:
+    Type: AWS::EC2::Route
+    Condition: ShouldConfigureZoneC
+    Properties:
+      RouteTableId: !Ref ZoneCPrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref ZoneCNat
+
+  ZoneCPrivateSubnet:
+    Type: AWS::EC2::Subnet
+    Condition: ShouldConfigureZoneC
+    Properties:
+      AvailabilityZone: !Select
+        - 1
+        - Fn::GetAZs: !Ref 'AWS::Region'
+      CidrBlock:  !GetAtt ZoneCPrivateSubnetAllocate.cidr
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-ZoneCPrivateSubnet
+
+  ZoneCPrivateRouteTableAttachment:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: ShouldConfigureZoneC
+    Properties:
+      RouteTableId: !Ref ZoneCPrivateRouteTable
+      SubnetId: !Ref ZoneCPrivateSubnet
+
+  ZoneCPrivateSubnetUpdateMetadata:
+    Type: Custom::SubnetUpdateMetadata
+    Condition: ShouldConfigureZoneC
+    Properties:
+      ServiceToken: !GetAtt IpamApiFunction.Arn
+      CidrApiEndpoint: !Ref CidrApiEndpoint
+      Cidr: !GetAtt ZoneCPrivateSubnetAllocate.cidr
+      VpcId: !Ref VpcId
+      SubnetId: !Ref ZoneCPrivateSubnet
+      AvailabilityZone: !GetAtt ZoneCPrivateSubnet.AvailabilityZone
+      ApiRegion: !Select [2, !Split [".", !Ref CidrApiEndpoint]]
+
+  ############ IPAM Magic <3
+
+
+  IpamApiFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Code:
+        ZipFile: |
+          const AWS = require('aws-sdk');
+          const https = require('https');
+          var cfn;
+          try {
+              cfn = require('cfn-response');
+          } catch (e){
+              // SAM doesnt have cfn-response, mock by logging to console.log.
+              cfn = {};
+              cfn.send = function(){
+                  console.log(JSON.stringify(arguments));
+              }
+          }
+
+          exports.handler = async function (event, context) {
+              console.log(event);
+              try {
+                  var status = cfn.FAILED;
+                  var response;
+                  switch (event['RequestType']) {
+                      case "Create":
+                          if ( event['ResourceProperties']['Cidr'] ) {
+                              response = await putHandler(event);
+                          }else{
+                              response = await postHandler(event);
+                          }
+                          break;
+                      case "Delete":
+                          if ( event['ResourceProperties']['Cidr'] ) {
+                              response = await deleteHandler(event);
+                          }else{
+                              response = {message:'noop'};
+                          }
+                          break;
+                      case "Update":
+                          // Update is a NOOP.
+                          response = {message:'noop'};
+                          break;
+                  }
+                  status = cfn.SUCCESS;
+              } catch (error) {
+                  response = {error: error};
+              }
+              await cfn.send(event, context, status, response);
+          }
+
+          async function deleteHandler(event) {
+              var url = event['ResourceProperties']['CidrApiEndpoint'].replace(/\/$/, "") + "/subnet";
+              url += '?cidr=' + event['ResourceProperties']['Cidr'];
+              return makeApiQuest('DELETE', url);
+          }
+
+          async function postHandler(event) {
+              var url = event['ResourceProperties']['CidrApiEndpoint'].replace(/\/$/, "") + "/subnet";
+              url += '?prefix=' + event['ResourceProperties']['Prefix'];
+              url += '&vpcid=' + event['ResourceProperties']['VpcId'];
+
+              return makeApiQuest('POST', url);
+          }
+
+          async function putHandler(event) {
+              var url = event['ResourceProperties']['CidrApiEndpoint'].replace(/\/$/, "") + "/subnet";
+              url += '?cidr=' + event['ResourceProperties']['Cidr'];
+              url += '&subnetid=' + event['ResourceProperties']['SubnetId'];
+              url += '&availabilityzone=' + event['ResourceProperties']['AvailabilityZone'];
+
+              return makeApiQuest('PUT', url);
+          }
+
+          function makeApiQuest(method, uri) {
+              const uriParts = new URL(uri);
+
+              const httpRequest = new AWS.HttpRequest(uri, process.env['AWS_REGION']);
+              httpRequest.headers.host = uriParts.host;
+              httpRequest.headers['Content-Type'] = 'application/json';
+              httpRequest.method = method;
+
+              const signer = new AWS.Signers.V4(httpRequest, "execute-api", true);
+              signer.addAuthorization(AWS.config.credentials, AWS.util.date.getDate());
+
+              const options = {
+                  host: uriParts.host,
+                  protocol: uriParts.protocol,
+                  path: uriParts.pathname + uriParts.search,
+                  headers: httpRequest.headers,
+                  method: method
+              }
+
+              return new Promise((resolve, reject) => {
+                  const req = https.request(options, (res) => {
+                      var response = "";
+
+                      res.on('data', (d) => {
+                          response += d;
+                      });
+                      res.on('end', (data) => {
+                          response = JSON.parse(response);
+
+                          if (res.statusCode === 200) {
+                              resolve(response);
+                          } else {
+                              reject(response.message);
+                          }
+                      });
+                  });
+
+                  req.on('error', (e) => {
+                      reject(e);
+                  });
+
+                  req.end();
+              });
+          }
+      Handler: index.handler
+      Description: A simple example includes a HTTP get method to get all items from a DynamoDB table.
+      Runtime: nodejs12.x
+      MemorySize: 128
+      Timeout: 100
+      Role: !GetAtt LambdaExecutionRole.Arn
+
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonAPIGatewayInvokeFullAccess
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:*
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:DescribeLogGroups
+                Resource: !Sub arn:${AWS::Partition}:logs:*:*:*
+
+
+Outputs:
+  VPC:
+    Description: The ID of the VPC
+    Value: !Ref VpcId
+    Export:
+      Name: !Sub "${AWS::StackName}-VPC"
+  PublicSubnets:
+    Description: Created Public subnets
+    Value: !Join [',', [
+    !If [ShouldConfigureZoneA, !Ref ZoneAPublicSubnet, !Ref 'AWS::NoValue'],
+    !If [ShouldConfigureZoneB, !Ref ZoneBPublicSubnet, !Ref 'AWS::NoValue'],
+    !If [ShouldConfigureZoneC, !Ref ZoneCPublicSubnet, !Ref 'AWS::NoValue'],
+    ]]
+
+  PublicSubnetsCidrs:
+    Description: Created Public Subnet cidrs
+    Value: !Join [',', [
+    !If [ShouldConfigureZoneA,  !GetAtt ZoneAPublicSubnetAllocate.cidr, !Ref 'AWS::NoValue'],
+    !If [ShouldConfigureZoneB,  !GetAtt ZoneBPublicSubnetAllocate.cidr, !Ref 'AWS::NoValue'],
+    !If [ShouldConfigureZoneC,  !GetAtt ZoneCPublicSubnetAllocate.cidr, !Ref 'AWS::NoValue'],
+    ]]
+
+  PrivateSubnets:
+    Description: Created Private subnets
+    Value: !Join [',', [
+    !If [ShouldConfigureZoneA, !Ref ZoneAPrivateSubnet, !Ref 'AWS::NoValue'],
+    !If [ShouldConfigureZoneB, !Ref ZoneBPrivateSubnet, !Ref 'AWS::NoValue'],
+    !If [ShouldConfigureZoneC, !Ref ZoneCPrivateSubnet, !Ref 'AWS::NoValue'],
+    ]]
+
+  PrivateSubnetsCidrs:
+    Description: Created Private Subnet cidrs
+    Value: !Join [',', [
+    !If [ShouldConfigureZoneA,  !GetAtt ZoneAPrivateSubnetAllocate.cidr, !Ref 'AWS::NoValue'],
+    !If [ShouldConfigureZoneB,  !GetAtt ZoneBPrivateSubnetAllocate.cidr, !Ref 'AWS::NoValue'],
+    !If [ShouldConfigureZoneC,  !GetAtt ZoneCPrivateSubnetAllocate.cidr, !Ref 'AWS::NoValue'],
+    ]]
+
+  AvailabilityZones:
+    Description: Created AvailabilityZones
+    Value: !Join [',', [
+    !If [ShouldConfigureZoneA,  !GetAtt ZoneAPublicSubnet.AvailabilityZone, !Ref 'AWS::NoValue'],
+    !If [ShouldConfigureZoneB,  !GetAtt ZoneBPublicSubnet.AvailabilityZone, !Ref 'AWS::NoValue'],
+    !If [ShouldConfigureZoneC,  !GetAtt ZoneCPublicSubnet.AvailabilityZone, !Ref 'AWS::NoValue'],
+    ]]
+    Export:
+      Name: !Sub "${AWS::StackName}-AvailabilityZones"

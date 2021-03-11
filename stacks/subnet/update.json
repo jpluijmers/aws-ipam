@@ -1,0 +1,9 @@
+{
+  "ResourceProperties": {
+    "CidrApiEndpoint": "https://jvhop5b440.execute-api.eu-west-1.amazonaws.com/v0",
+    "Cidr": "10.0.1.0/24",
+    "SubnetId": "TEST",
+    "AvailabilityZone": "TEST"
+  },
+  "RequestType": "Create"
+}

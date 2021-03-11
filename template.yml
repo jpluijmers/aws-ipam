@@ -1,0 +1,504 @@
+# This is the SAM template that represents the architecture of your serverless application
+# https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/serverless-sam-template-basics.html
+
+# The AWSTemplateFormatVersion identifies the capabilities of the template
+# https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/format-version-structure.html
+AWSTemplateFormatVersion: 2010-09-09
+Description: >-
+  aws-ip-vending
+
+Parameters:
+  OrganizationsId:
+    Type: String
+    Default: o-kfsxtj8fwl
+  RootOrganizationUnitId:
+    Type: String
+    Default: r-4rhz
+  FailureAlertEmail:
+    Type: String
+
+# Transform section specifies one or more macros that AWS CloudFormation uses to process your template
+# https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/transform-section-structure.html
+Transform:
+  - AWS::Serverless-2016-10-31
+
+
+Globals:
+  Function:
+    Environment:
+      # # Environment variables used by every function
+       Variables:
+         DYNAMODB_SUBNETS_TABLE: !Sub '${AWS::StackName}-ipam-DDBSubnetsTable'
+         DYNAMODB_VPC_TABLE: !Sub '${AWS::StackName}-ipam-DDBVpcTable'
+         DYNAMODB_SUPERNETS_TABLE: !Sub '${AWS::StackName}-ipam-DDBSupernetsTableName'
+         SNS_TOPIC: !Ref SnsAlerts
+    Runtime: nodejs14.x
+    MemorySize: 128
+    Timeout: 100
+
+# Resources declares the AWS resources that you want to include in the stack
+# https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/resources-section-structure.html
+Resources:
+  # Each Lambda function is defined by properties:
+  # https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+
+  VpcGetFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Role: !GetAtt LambdaRole.Arn
+      CodeUri: .
+      Handler: src/handlers/vpc/get-handler.getHandler
+      Description: A simple example includes a HTTP get method to get all items from a DynamoDB table.
+
+  VpcPutFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Role: !GetAtt LambdaRole.Arn
+      CodeUri: .
+      Handler: src/handlers/vpc/put-handler.putHandler
+      Description: A simple example includes a HTTP get method to get all items from a DynamoDB table.
+
+  VpcPostFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Role: !GetAtt LambdaRole.Arn
+      CodeUri: .
+      Handler: src/handlers/vpc/post-handler.postHandler
+      Description: A simple example includes a HTTP get method to get all items from a DynamoDB table.
+
+  VpcDeleteFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Role: !GetAtt LambdaRole.Arn
+      CodeUri: .
+      Handler: src/handlers/vpc/delete-handler.deleteHandler
+      Description: A simple example includes a HTTP get method to get all items from a DynamoDB table.
+
+  SubnetPostFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Role: !GetAtt LambdaRole.Arn
+      CodeUri: .
+      Handler: src/handlers/subnet/post-handler.postHandler
+      Description: A simple example includes a HTTP get method to get all items from a DynamoDB table.
+#      Events:
+#        Api:
+#          Type: Api
+#          Properties:
+#            Path: /subnet
+#            Method: post
+
+  SubnetGetFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Role: !GetAtt LambdaRole.Arn
+      CodeUri: .
+      Handler: src/handlers/subnet/get-handler.getHandler
+      Description: A simple example includes a HTTP get method to get all items from a DynamoDB table.
+#      Events:
+#        Api:
+#          Type: Api
+#          Properties:
+#            Path: /subnet
+#            Method: get
+
+  SubnetDeleteFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Role: !GetAtt LambdaRole.Arn
+      CodeUri: .
+      Handler: src/handlers/subnet/delete-handler.deleteHandler
+      Description: A simple example includes a HTTP get method to get all items from a DynamoDB table.
+#      Events:
+#        Api:
+#          Type: Api
+#          Properties:
+#            Path: /subnet
+#            Method: delete
+
+  SubnetPutFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Role: !GetAtt LambdaRole.Arn
+      CodeUri: .
+      Handler: src/handlers/subnet/put-handler.putHandler
+      Description: A simple example includes a HTTP get method to get all items from a DynamoDB table.
+#      Events:
+#        Api:
+#          Type: Api
+#          Properties:
+#            Path: /subnet
+#            Method: put
+
+  DDBSubnetsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub '${AWS::StackName}-ipam-DDBSubnetsTable'
+      AttributeDefinitions:
+        -
+          AttributeName: "Cidr"
+          AttributeType: "S"
+      KeySchema:
+        -
+          AttributeName: "Cidr"
+          KeyType: "HASH"
+      ProvisionedThroughput:
+        ReadCapacityUnits: "5"
+        WriteCapacityUnits: "5"
+
+
+
+  DDBVpcTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub '${AWS::StackName}-ipam-DDBVpcTable'
+      AttributeDefinitions:
+        -
+          AttributeName: "Cidr"
+          AttributeType: "S"
+      KeySchema:
+        -
+          AttributeName: "Cidr"
+          KeyType: "HASH"
+      ProvisionedThroughput:
+        ReadCapacityUnits: "5"
+        WriteCapacityUnits: "5"
+
+  DDBSupernetsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName:  !Sub '${AWS::StackName}-ipam-DDBSupernetsTableName'
+      AttributeDefinitions:
+        -
+          AttributeName: "Cidr"
+          AttributeType: "S"
+      KeySchema:
+        -
+          AttributeName: "Cidr"
+          KeyType: "HASH"
+      ProvisionedThroughput:
+        ReadCapacityUnits: "5"
+        WriteCapacityUnits: "5"
+
+  SnsAlerts:
+    Type: AWS::SNS::Topic
+    Properties:
+      Subscription:
+        - Endpoint: !Ref FailureAlertEmail
+          Protocol: email
+
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action:
+              - sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+        Version: 2012-10-17
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AWSLambdaExecute
+        - arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess
+      Policies:
+        - PolicyName: ip-mgmt-lambda-sns-access
+          PolicyDocument:
+            Statement:
+              - Sid: GrantSnsAccess
+                Effect: Allow
+                Action:
+                  - sns:Publish
+                Resource: !Ref SnsAlerts
+      Path: /
+
+  #VPC api endpoints
+  ApiGatewayVpcGetMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      ApiKeyRequired: false
+      AuthorizationType: AWS_IAM
+      HttpMethod: GET
+      Integration:
+        ConnectionType: INTERNET
+        Credentials: !GetAtt ApiGatewayIamRole.Arn
+        IntegrationHttpMethod: POST
+        PassthroughBehavior: WHEN_NO_MATCH
+        TimeoutInMillis: 29000
+        Type: AWS_PROXY
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${VpcGetFunction.Arn}/invocations'
+      OperationName: 'vpc'
+      ResourceId: !Ref ApiGatewayVpcResource
+      RestApiId: !Ref ApiGatewayRestApi
+      RequestValidatorId: !Ref RequestValidator
+      RequestParameters:
+        method.request.querystring.cidr: true
+
+  ApiGatewayVpcPostMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      ApiKeyRequired: false
+      AuthorizationType: AWS_IAM
+      HttpMethod: POST
+      Integration:
+        ConnectionType: INTERNET
+        Credentials: !GetAtt ApiGatewayIamRole.Arn
+        IntegrationHttpMethod: POST
+        PassthroughBehavior: WHEN_NO_MATCH
+        TimeoutInMillis: 29000
+        Type: AWS_PROXY
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${VpcPostFunction.Arn}/invocations'
+      OperationName: 'vpc'
+      ResourceId: !Ref ApiGatewayVpcResource
+      RestApiId: !Ref ApiGatewayRestApi
+      RequestValidatorId: !Ref RequestValidator
+      RequestParameters:
+        method.request.querystring.accountid: true
+        method.request.querystring.prefix: true
+        method.request.querystring.projectcode: true
+        method.request.querystring.reason: true
+        method.request.querystring.requestor: true
+        method.request.querystring.region: true
+        method.request.querystring.env: true
+
+  ApiGatewayVpcDeleteMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      ApiKeyRequired: false
+      AuthorizationType: AWS_IAM
+      HttpMethod: DELETE
+      Integration:
+        ConnectionType: INTERNET
+        Credentials: !GetAtt ApiGatewayIamRole.Arn
+        IntegrationHttpMethod: POST
+        PassthroughBehavior: WHEN_NO_MATCH
+        TimeoutInMillis: 29000
+        Type: AWS_PROXY
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${VpcDeleteFunction.Arn}/invocations'
+      OperationName: 'vpc'
+      ResourceId: !Ref ApiGatewayVpcResource
+      RestApiId: !Ref ApiGatewayRestApi
+
+  ApiGatewayVpcPutMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      ApiKeyRequired: false
+      AuthorizationType: AWS_IAM
+      HttpMethod: PUT
+      Integration:
+        ConnectionType: INTERNET
+        Credentials: !GetAtt ApiGatewayIamRole.Arn
+        IntegrationHttpMethod: POST
+        PassthroughBehavior: WHEN_NO_MATCH
+        TimeoutInMillis: 29000
+        Type: AWS_PROXY
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${VpcPutFunction.Arn}/invocations'
+      OperationName: 'vpc'
+      ResourceId: !Ref ApiGatewayVpcResource
+      RestApiId: !Ref ApiGatewayRestApi
+      RequestValidatorId: !Ref RequestValidator
+      RequestParameters:
+        method.request.querystring.cidr: true
+        method.request.querystring.vpcid: true
+
+  ApiGatewaySubnetGetMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      ApiKeyRequired: false
+      AuthorizationType: AWS_IAM
+      HttpMethod: GET
+      Integration:
+        ConnectionType: INTERNET
+        Credentials: !GetAtt ApiGatewayIamRole.Arn
+        IntegrationHttpMethod: POST
+        PassthroughBehavior: WHEN_NO_MATCH
+        TimeoutInMillis: 29000
+        Type: AWS_PROXY
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${SubnetGetFunction.Arn}/invocations'
+      OperationName: 'subnet'
+      ResourceId: !Ref ApiGatewaySubnetResource
+      RestApiId: !Ref ApiGatewayRestApi
+      RequestValidatorId: !Ref RequestValidator
+      RequestParameters:
+        method.request.querystring.cidr: true
+
+  ApiGatewaySubnetPostMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      ApiKeyRequired: false
+      AuthorizationType: AWS_IAM
+      HttpMethod: POST
+      Integration:
+        ConnectionType: INTERNET
+        Credentials: !GetAtt ApiGatewayIamRole.Arn
+        IntegrationHttpMethod: POST
+        PassthroughBehavior: WHEN_NO_MATCH
+        TimeoutInMillis: 29000
+        Type: AWS_PROXY
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${SubnetPostFunction.Arn}/invocations'
+      OperationName: 'subnet'
+      ResourceId: !Ref ApiGatewaySubnetResource
+      RestApiId: !Ref ApiGatewayRestApi
+      RequestValidatorId: !Ref RequestValidator
+      RequestParameters:
+        method.request.querystring.vpcid: true
+        method.request.querystring.prefix: true
+
+  ApiGatewaySubnetDeleteMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      ApiKeyRequired: false
+      AuthorizationType: AWS_IAM
+      HttpMethod: DELETE
+      Integration:
+        ConnectionType: INTERNET
+        Credentials: !GetAtt ApiGatewayIamRole.Arn
+        IntegrationHttpMethod: POST
+        PassthroughBehavior: WHEN_NO_MATCH
+        TimeoutInMillis: 29000
+        Type: AWS_PROXY
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${SubnetDeleteFunction.Arn}/invocations'
+      OperationName: 'subnet'
+      ResourceId: !Ref ApiGatewaySubnetResource
+      RestApiId: !Ref ApiGatewayRestApi
+      RequestValidatorId: !Ref RequestValidator
+      RequestParameters:
+        method.request.querystring.cidr: true
+
+  ApiGatewaySubnetPutMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      ApiKeyRequired: false
+      AuthorizationType: AWS_IAM
+      HttpMethod: PUT
+      Integration:
+        ConnectionType: INTERNET
+        Credentials: !GetAtt ApiGatewayIamRole.Arn
+        IntegrationHttpMethod: POST
+        PassthroughBehavior: WHEN_NO_MATCH
+        TimeoutInMillis: 29000
+        Type: AWS_PROXY
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${SubnetPutFunction.Arn}/invocations'
+      OperationName: 'subnet'
+      ResourceId: !Ref ApiGatewaySubnetResource
+      RestApiId: !Ref ApiGatewayRestApi
+      RequestValidatorId: !Ref RequestValidator
+      RequestParameters:
+        method.request.querystring.cidr: true
+        method.request.querystring.subnetid: true
+        method.request.querystring.availabilityzone: true
+
+
+  #VPC api settings
+  ApiGatewayRestApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Description: An API Gateway to allow IP Management
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+      Name: !Sub '${AWS::StackName}-vixy-ipam'
+      Policy: !Sub |
+        {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Effect": "Allow",
+                    "Principal": "*",
+                    "Action": "execute-api:Invoke",
+                    "Resource": "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:*",
+                    "Condition": {
+                        "ForAnyValue:StringLike": {
+                            "aws:PrincipalOrgPaths": "${OrganizationsId}/${RootOrganizationUnitId}/*"
+                        }
+                    }
+                }
+            ]
+        }
+
+  RequestValidator:
+    Type: AWS::ApiGateway::RequestValidator
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      ValidateRequestParameters: true
+
+  ApiGatewayVpcResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId: !GetAtt ApiGatewayRestApi.RootResourceId
+      PathPart: 'vpc'
+      RestApiId: !Ref ApiGatewayRestApi
+
+  ApiGatewaySubnetResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId: !GetAtt ApiGatewayRestApi.RootResourceId
+      PathPart: 'subnet'
+      RestApiId: !Ref ApiGatewayRestApi
+
+  ApiGatewayModel:
+    Type: AWS::ApiGateway::Model
+    Properties:
+      ContentType: 'application/json'
+      RestApiId: !Ref ApiGatewayRestApi
+      Schema: {}
+
+  ApiGatewayStage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      DeploymentId: !Ref ApiGatewayDeployment
+      Description: Lambda API Stage v0
+      RestApiId: !Ref ApiGatewayRestApi
+      StageName: 'v0'
+
+  ApiGatewayDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn: ApiGatewayVpcGetMethod
+    Properties:
+      Description: Lambda API Deployment
+      RestApiId: !Ref ApiGatewayRestApi
+
+  ApiGatewayIamRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: ''
+            Effect: 'Allow'
+            Principal:
+              Service:
+                - 'apigateway.amazonaws.com'
+            Action:
+              - 'sts:AssumeRole'
+      Path: '/'
+      Policies:
+        - PolicyName: LambdaAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: 'Allow'
+                Action: 'lambda:*'
+                Resource: !GetAtt VpcGetFunction.Arn
+              - Effect: 'Allow'
+                Action: 'lambda:*'
+                Resource: !GetAtt VpcPostFunction.Arn
+              - Effect: 'Allow'
+                Action: 'lambda:*'
+                Resource: !GetAtt VpcPutFunction.Arn
+              - Effect: 'Allow'
+                Action: 'lambda:*'
+                Resource: !GetAtt VpcDeleteFunction.Arn
+              - Effect: 'Allow'
+                Action: 'lambda:*'
+                Resource: !GetAtt SubnetGetFunction.Arn
+              - Effect: 'Allow'
+                Action: 'lambda:*'
+                Resource: !GetAtt SubnetPostFunction.Arn
+              - Effect: 'Allow'
+                Action: 'lambda:*'
+                Resource: !GetAtt SubnetDeleteFunction.Arn
+              - Effect: 'Allow'
+                Action: 'lambda:*'
+                Resource: !GetAtt SubnetPutFunction.Arn

@@ -1,0 +1,8 @@
+{
+  "ResourceProperties": {
+    "CidrApiEndpoint": "https://ecjpncaf72.execute-api.eu-west-1.amazonaws.com/v0",
+    "Cidr": "10.0.32.0/19",
+    "VpcId": "TEST_VPC_ID"
+  },
+  "RequestType": "Create"
+}
